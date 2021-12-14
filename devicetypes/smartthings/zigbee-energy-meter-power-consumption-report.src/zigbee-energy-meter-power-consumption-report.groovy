@@ -142,7 +142,7 @@ def refresh() {
 }
 
 def configure() {
-    // this device will send instantaneous demand and current summation delivered every 1 minute
+    // this device will send instantaneous demand and current summation delivered every 12 minute
     sendEvent(name: "checkInterval", value: 2 * 60 + 10 * 60, displayed: false, data: [protocol: "zigbee", hubHardwareId: device.hub.hardwareID])
 
     log.debug "Configuring Reporting"
