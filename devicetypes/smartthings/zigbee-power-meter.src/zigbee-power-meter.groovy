@@ -21,7 +21,9 @@ metadata {
         capability "Health Check"
         capability "Sensor"
         capability "Configuration"
+        capability "Power Consumption Report"
 
+        fingerprint profileId: "0104", deviceId:"0053", inClusters: "0000, 0003, 0004, 0B04, 0702", outClusters: "0019", manufacturer: "", model: "E240-KR080Z0-HA", deviceJoinName: "Energy Monitor" //Smart Sub-meter(CT Type)
         fingerprint profileId: "0104", deviceId:"0007", inClusters: "0000,0003,0702", outClusters: "000A", manufacturer: "Develco", model: "ZHEMI101", deviceJoinName: "frient Energy Monitor" // frient External Meter Interface (develco) 02 0104 0007 00 03 0000 0003 0702 01 000A
         fingerprint profileId: "0104", manufacturer: "Develco Products A/S", model: "EMIZB-132", deviceJoinName: "frient Energy Monitor" // frient Norwegian HAN (develco) 02 0104 0053 00 06 0000 0003 0020 0702 0704 0B04 03 0003 000A 0019
         fingerprint profileId: "0104", manufacturer: "ShinaSystem", model: "PMM-300Z1", deviceJoinName: "SiHAS Energy Monitor" // SIHAS Power Meter 01 0104 0000 01 05 0000 0004 0003 0B04 0702 02 0004 0019
@@ -103,6 +105,17 @@ def parse(String description) {
                         map.name = "energy"
                         map.value = zigbee.convertHexToInt(it.value)/(energyDivisor * 1000)
                         map.unit = "kWh"
+                        
+                        if (isEZEX()) {
+                            def currentEnergy = zigbee.convertHexToInt(it.value)
+                            def currentPowerConsumption = device.currentState("powerConsumption")?.value
+                            Map previousMap = currentPowerConsumption ? new groovy.json.JsonSlurper().parseText(currentPowerConsumption) : [:]
+                            def deltaEnergy = calculateDelta (currentEnergy, previousMap)
+                            Map reportMap = [:]
+                            reportMap["energy"] = currentEnergy
+                            reportMap["deltaEnergy"] = deltaEnergy 
+                            sendEvent("name": "powerConsumption", "value": reportMap.encodeAsJSON(), displayed: false)
+                        }
                     }
                 }
                 
@@ -148,6 +161,14 @@ private getActivePowerDivisor() { isPMM300Z1() ? 1 : 10 }
 private getPowerDivisor() { (isFrientSensor() || isPMM300Z1()) ? 1 : 1000 }
 private getEnergyDivisor() { (isFrientSensor() || isPMM300Z1()) ? 1 : 1000 }
 
+BigDecimal calculateDelta (BigDecimal currentEnergy, Map previousMap) {
+if (previousMap?.'energy' == null) {
+return 0;
+}
+BigDecimal lastAcumulated = BigDecimal.valueOf(previousMap ['energy']);
+return currentEnergy.subtract(lastAcumulated).max(BigDecimal.ZERO);
+}
+
 private Boolean isFrientSensor() {
 	device.getDataValue("manufacturer") == "Develco Products A/S" ||
 		device.getDataValue("manufacturer") == "Develco"
@@ -155,4 +176,8 @@ private Boolean isFrientSensor() {
 
 private Boolean isPMM300Z1() {
     device.getDataValue("model") == "PMM-300Z1"
+}
+
+private Boolean isEZEX() {
+	device.getDataValue("model") == "E240-KR080Z0-HA"
 }
