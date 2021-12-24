@@ -1,14 +1,14 @@
 /**
- *	Copyright 2019 SmartThings
+ * 	Copyright 2019 SmartThings
  *
- *	Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except
- *	in compliance with the License. You may obtain a copy of the License at:
+ * 	Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except
+ * 	in compliance with the License. You may obtain a copy of the License at:
  *
  *		http://www.apache.org/licenses/LICENSE-2.0
  *
- *	Unless required by applicable law or agreed to in writing, software distributed under the License is distributed
- *	on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License
- *	for the specific language governing permissions and limitations under the License.
+ * 	Unless required by applicable law or agreed to in writing, software distributed under the License is distributed
+ * 	on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License
+ * 	for the specific language governing permissions and limitations under the License.
  *
  */
 import physicalgraph.zigbee.zcl.DataType
@@ -113,17 +113,32 @@ def parse(String description) {
 					map.unit = "kWh"
 
 					if (isEZEX()) {
-						def currentEnergy = zigbee.convertHexToInt(it.value)
-						def currentPowerConsumption = device.currentState("powerConsumption")?.value
-						Map previousMap = currentPowerConsumption ? new groovy.json.JsonSlurper().parseText(currentPowerConsumption) : [:]
+						def currentEnergy = zigbee.convertHexToInt(it.value) / 1000
+						def prevPowerConsumption = device.currentState("powerConsumption")?.value
+						Map previousMap = prevPowerConsumption ? new groovy.json.JsonSlurper().parseText(prevPowerConsumption) : [:]
 						def deltaEnergy = calculateDelta(currentEnergy, previousMap)
 						def currentTimestamp = Calendar.getInstance().timeInMillis
-						if (currentTimestamp - getPrevTimestamp(previousMap) >= 15 * 60 * 1000) {
-							zMap reportMap = [:]
+						def prevTimestamp = device.currentState("powerConsumption")?.date?.time
+						if (prevTimestamp == null) prevTimestamp = 0L
+						def timeDiff = currentTimestamp - prevTimestamp
+						log.debug "currentTimestamp= $currentTimestamp, prevTimestamp= $prevTimestamp, timeDiff= $timeDiff"
+						log.debug "deltaEnergy= $deltaEnergy"
+						if (deltaEnergy < 0) {
+							Map reportMap = [:]
 							reportMap["energy"] = currentEnergy
-							reportMap["deltaEnergy"] = deltaEnergy
-							reportMap["timestamp"] = currentTimestamp
+							reportMap["deltaEnergy"] = 0
 							sendEvent("name": "powerConsumption", "value": reportMap.encodeAsJSON(), displayed: false)
+						} else {
+							if (timeDiff >= 15 * 60 * 1000) {
+								Map reportMap = [:]
+								reportMap["energy"] = currentEnergy
+								if (timeDiff < 24 * 60 * 60 * 1000) {
+									reportMap["deltaEnergy"] = deltaEnergy
+								} else {
+									reportMap["deltaEnergy"] = 0
+								}
+								sendEvent("name": "powerConsumption", "value": reportMap.encodeAsJSON(), displayed: false)
+							}
 						}
 					}
 				}
@@ -175,10 +190,12 @@ private getEnergyDivisor() { (isFrientSensor() || isPMM300Z1()) ? 1 : 1000 }
 
 BigDecimal calculateDelta(BigDecimal currentEnergy, Map previousMap) {
 	if (previousMap?.'energy' == null) {
+		log.debug "prevEnergy is null"
 		return 0
 	}
 	BigDecimal lastAccumulated = BigDecimal.valueOf(previousMap['energy'])
-	return currentEnergy.subtract(lastAccumulated).max(BigDecimal.ZERO)
+	log.debug "currentEnergy= $currentEnergy, prevEnergy= $lastAccumulated"
+	return currentEnergy.subtract(lastAccumulated)
 }
 
 private Boolean isFrientSensor() {
@@ -192,12 +209,4 @@ private Boolean isPMM300Z1() {
 
 private Boolean isEZEX() {
 	device.getDataValue("model") == "E240-KR080Z0-HA"
-}
-
-private long getPrevTimestamp(Map previousMap) {
-	if (previousMap?.'timestamp' == null) {
-		return 0
-	}
-	long lastTimestamp = Long.valueOf(previousMap['timestamp'])
-	return lastTimestamp
 }
